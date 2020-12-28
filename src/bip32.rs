@@ -1,9 +1,10 @@
 #[cfg(feature = "std")]
 use base58::FromBase58;
-use core::ops::Deref;
 use core::str::FromStr;
+use core::{convert::TryInto, ops::Deref};
 use hmac::{Hmac, Mac};
-use k256::{PublicKey, SecretKey};
+use k256::{elliptic_curve::sec1::ToEncodedPoint, Scalar};
+use k256::{EncodedPoint, PublicKey, SecretKey};
 use sha2::Sha512;
 #[cfg(feature = "std")]
 use std::fmt;
@@ -32,10 +33,9 @@ impl Deref for Protected {
     }
 }
 
-#[cfg(feature = "std")]
-impl fmt::Debug for Protected {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Protected")
+impl Drop for Protected {
+    fn drop(&mut self) {
+        self.0.iter_mut().for_each(|b| *b = 0)
     }
 }
 
@@ -72,18 +72,23 @@ impl ExtendedPrivKey {
         Ok(sk)
     }
 
-    // pub fn secret(&self) -> &[u8; 32] {
-    //     self.secret_key.to_bytes()
-    // }
+    pub fn secret(&self) -> [u8; 32] {
+        let bytes = self.secret_key.to_bytes();
+        bytes.as_slice().try_into().unwrap()
+    }
 
     pub fn child(&self, child: ChildNumber) -> Result<ExtendedPrivKey, Error> {
         let mut hmac: Hmac<Sha512> =
             Hmac::new_varkey(&self.chain_code).map_err(|_| Error::InvalidChildNumber)?;
 
         if child.is_normal() {
-            // TODO: fix this
             // hmac.input(&PublicKey::from_secret_key(&self.secret_key).serialize_compressed()[..]);
-            // hmac.input(self.secret_key.public_key().);
+            hmac.input(
+                self.secret_key
+                    .public_key()
+                    .to_encoded_point(true)
+                    .as_bytes(),
+            );
         } else {
             hmac.input(&[0]);
             hmac.input(&self.secret_key.to_bytes()[..]);
@@ -99,6 +104,11 @@ impl ExtendedPrivKey {
         // secret_key
         //     .tweak_add_assign(&self.secret_key)
         //     .map_err(Error::Secp256k1)?;
+        secret_key = SecretKey::from_bytes(
+            (secret_key.secret_scalar().as_ref() + self.secret_key.secret_scalar().as_ref())
+                .to_bytes(),
+        )
+        .map_err(|_| Error::Secp256k1)?;
 
         Ok(ExtendedPrivKey {
             secret_key,
