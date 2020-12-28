@@ -1,10 +1,11 @@
-use secp256k1::{SecretKey, PublicKey};
 use base58::FromBase58;
-use sha2::Sha512;
+use core::ops::Deref;
+use core::str::FromStr;
 use hmac::{Hmac, Mac};
 use memzero::Memzero;
-use std::ops::Deref;
-use std::str::FromStr;
+use secp256k1::{PublicKey, SecretKey};
+use sha2::Sha512;
+#[cfg(feature = "std")]
 use std::fmt;
 
 use crate::bip44::{ChildNumber, IntoDerivationPath};
@@ -31,13 +32,15 @@ impl Deref for Protected {
     }
 }
 
+#[cfg(feature = "std")]
 impl fmt::Debug for Protected {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Protected")
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "std", derive(Debug))]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ExtendedPrivKey {
     secret_key: SecretKey,
     chain_code: Protected,
@@ -49,7 +52,8 @@ impl ExtendedPrivKey {
     where
         Path: IntoDerivationPath,
     {
-        let mut hmac: Hmac<Sha512> = Hmac::new_varkey(b"Bitcoin seed").expect("seed is always correct; qed");
+        let mut hmac: Hmac<Sha512> =
+            Hmac::new_varkey(b"Bitcoin seed").expect("seed is always correct; qed");
         hmac.input(seed);
 
         let result = hmac.result().code();
@@ -72,8 +76,8 @@ impl ExtendedPrivKey {
     }
 
     pub fn child(&self, child: ChildNumber) -> Result<ExtendedPrivKey, Error> {
-        let mut hmac: Hmac<Sha512> = Hmac::new_varkey(&self.chain_code)
-            .map_err(|_| Error::InvalidChildNumber)?;
+        let mut hmac: Hmac<Sha512> =
+            Hmac::new_varkey(&self.chain_code).map_err(|_| Error::InvalidChildNumber)?;
 
         if child.is_normal() {
             hmac.input(&PublicKey::from_secret_key(&self.secret_key).serialize_compressed()[..]);
@@ -88,11 +92,13 @@ impl ExtendedPrivKey {
         let (secret_key, chain_code) = result.split_at(32);
 
         let mut secret_key = SecretKey::parse_slice(&secret_key).map_err(Error::Secp256k1)?;
-        secret_key.tweak_add_assign(&self.secret_key).map_err(Error::Secp256k1)?;
+        secret_key
+            .tweak_add_assign(&self.secret_key)
+            .map_err(Error::Secp256k1)?;
 
         Ok(ExtendedPrivKey {
             secret_key,
-            chain_code: Protected::from(&chain_code)
+            chain_code: Protected::from(&chain_code),
         })
     }
 }
@@ -101,7 +107,9 @@ impl FromStr for ExtendedPrivKey {
     type Err = Error;
 
     fn from_str(xprv: &str) -> Result<ExtendedPrivKey, Error> {
-        let data = xprv.from_base58().map_err(|_| Error::InvalidExtendedPrivKey)?;
+        let data = xprv
+            .from_base58()
+            .map_err(|_| Error::InvalidExtendedPrivKey)?;
 
         if data.len() != 82 {
             return Err(Error::InvalidExtendedPrivKey);
@@ -109,7 +117,7 @@ impl FromStr for ExtendedPrivKey {
 
         Ok(ExtendedPrivKey {
             chain_code: Protected::from(&data[13..45]),
-            secret_key: SecretKey::parse_slice(&data[46..78]).map_err(|e| Error::Secp256k1(e))?
+            secret_key: SecretKey::parse_slice(&data[46..78]).map_err(|e| Error::Secp256k1(e))?,
         })
     }
 }
@@ -117,7 +125,7 @@ impl FromStr for ExtendedPrivKey {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bip39::{Mnemonic, Language, Seed};
+    use bip39::{Language, Mnemonic, Seed};
     use ethsign::SecretKey;
 
     #[test]
@@ -125,14 +133,19 @@ mod tests {
         let phrase = "panda eyebrow bullet gorilla call smoke muffin taste mesh discover soft ostrich alcohol speed nation flash devote level hobby quick inner drive ghost inside";
 
         let expected_secret_key = b"\xff\x1e\x68\xeb\x7b\xf2\xf4\x86\x51\xc4\x7e\xf0\x17\x7e\xb8\x15\x85\x73\x22\x25\x7c\x58\x94\xbb\x4c\xfd\x11\x76\xc9\x98\x93\x14";
-        let expected_address: &[u8] = b"\x63\xF9\xA9\x2D\x8D\x61\xb4\x8a\x9f\xFF\x8d\x58\x08\x04\x25\xA3\x01\x2d\x05\xC8";
+        let expected_address: &[u8] =
+            b"\x63\xF9\xA9\x2D\x8D\x61\xb4\x8a\x9f\xFF\x8d\x58\x08\x04\x25\xA3\x01\x2d\x05\xC8";
 
         let mnemonic = Mnemonic::from_phrase(phrase, Language::English).unwrap();
         let seed = Seed::new(&mnemonic, "");
 
         let account = ExtendedPrivKey::derive(seed.as_bytes(), "m/44'/60'/0'/0/0").unwrap();
 
-        assert_eq!(expected_secret_key, &account.secret(), "Secret key is invalid");
+        assert_eq!(
+            expected_secret_key,
+            &account.secret(),
+            "Secret key is invalid"
+        );
 
         let secret_key = SecretKey::from_raw(&account.secret()).unwrap();
         let public_key = secret_key.public();
@@ -140,9 +153,16 @@ mod tests {
         assert_eq!(expected_address, public_key.address(), "Address is invalid");
 
         // Test child method
-        let account = ExtendedPrivKey::derive(seed.as_bytes(), "m/44'/60'/0'/0").unwrap().child(ChildNumber::from_str("0").unwrap()).unwrap();
+        let account = ExtendedPrivKey::derive(seed.as_bytes(), "m/44'/60'/0'/0")
+            .unwrap()
+            .child(ChildNumber::from_str("0").unwrap())
+            .unwrap();
 
-        assert_eq!(expected_secret_key, &account.secret(), "Secret key is invalid");
+        assert_eq!(
+            expected_secret_key,
+            &account.secret(),
+            "Secret key is invalid"
+        );
 
         let secret_key = SecretKey::from_raw(&account.secret()).unwrap();
         let public_key = secret_key.public();

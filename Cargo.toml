@@ -16,7 +16,8 @@ base58 = "0.1.0"
 sha2 = "0.8.0"
 hmac = "0.7.0"
 memzero = "0.1.0"
+heapless = "*"
 
 [dev-dependencies]
 ethsign = { version = "0.3", default-features = false, features = ["secp256k1-rs"] }
-tiny-bip39 = "0.6"
+tiny-bip39 = {git="https://github.com/TheRealBluesun/tiny-bip39", branch="no_std", default-features=false}
