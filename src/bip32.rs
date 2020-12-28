@@ -1,9 +1,9 @@
+#[cfg(feature = "std")]
 use base58::FromBase58;
 use core::ops::Deref;
 use core::str::FromStr;
 use hmac::{Hmac, Mac};
-use memzero::Memzero;
-use secp256k1::{PublicKey, SecretKey};
+use k256::{PublicKey, SecretKey};
 use sha2::Sha512;
 #[cfg(feature = "std")]
 use std::fmt;
@@ -12,7 +12,7 @@ use crate::bip44::{ChildNumber, IntoDerivationPath};
 use crate::Error;
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct Protected(Memzero<[u8; 32]>);
+pub struct Protected([u8; 32]);
 
 impl<Data: AsRef<[u8]>> From<Data> for Protected {
     fn from(data: Data) -> Protected {
@@ -20,7 +20,7 @@ impl<Data: AsRef<[u8]>> From<Data> for Protected {
 
         buf.copy_from_slice(data.as_ref());
 
-        Protected(Memzero::from(buf))
+        Protected(buf)
     }
 }
 
@@ -39,8 +39,8 @@ impl fmt::Debug for Protected {
     }
 }
 
-#[cfg_attr(feature = "std", derive(Debug))]
-#[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "std", derive(Debug, PartialEq, Eq))]
+#[derive(Clone)]
 pub struct ExtendedPrivKey {
     secret_key: SecretKey,
     chain_code: Protected,
@@ -60,7 +60,8 @@ impl ExtendedPrivKey {
         let (secret_key, chain_code) = result.split_at(32);
 
         let mut sk = ExtendedPrivKey {
-            secret_key: SecretKey::parse_slice(secret_key).map_err(Error::Secp256k1)?,
+            // secret_key: SecretKey::parse_slice(secret_key).map_err(Error::Secp256k1)?,
+            secret_key: SecretKey::from_bytes(secret_key).map_err(|_| Error::Secp256k1)?,
             chain_code: Protected::from(chain_code),
         };
 
@@ -71,19 +72,21 @@ impl ExtendedPrivKey {
         Ok(sk)
     }
 
-    pub fn secret(&self) -> [u8; 32] {
-        self.secret_key.serialize()
-    }
+    // pub fn secret(&self) -> &[u8; 32] {
+    //     self.secret_key.to_bytes()
+    // }
 
     pub fn child(&self, child: ChildNumber) -> Result<ExtendedPrivKey, Error> {
         let mut hmac: Hmac<Sha512> =
             Hmac::new_varkey(&self.chain_code).map_err(|_| Error::InvalidChildNumber)?;
 
         if child.is_normal() {
-            hmac.input(&PublicKey::from_secret_key(&self.secret_key).serialize_compressed()[..]);
+            // TODO: fix this
+            // hmac.input(&PublicKey::from_secret_key(&self.secret_key).serialize_compressed()[..]);
+            // hmac.input(self.secret_key.public_key().);
         } else {
             hmac.input(&[0]);
-            hmac.input(&self.secret_key.serialize()[..]);
+            hmac.input(&self.secret_key.to_bytes()[..]);
         }
 
         hmac.input(&child.to_bytes());
@@ -91,10 +94,11 @@ impl ExtendedPrivKey {
         let result = hmac.result().code();
         let (secret_key, chain_code) = result.split_at(32);
 
-        let mut secret_key = SecretKey::parse_slice(&secret_key).map_err(Error::Secp256k1)?;
-        secret_key
-            .tweak_add_assign(&self.secret_key)
-            .map_err(Error::Secp256k1)?;
+        let mut secret_key = SecretKey::from_bytes(&secret_key).map_err(|_| Error::Secp256k1)?;
+        // TODO: fix this
+        // secret_key
+        //     .tweak_add_assign(&self.secret_key)
+        //     .map_err(Error::Secp256k1)?;
 
         Ok(ExtendedPrivKey {
             secret_key,
@@ -103,6 +107,7 @@ impl ExtendedPrivKey {
     }
 }
 
+#[cfg(feature = "std")]
 impl FromStr for ExtendedPrivKey {
     type Err = Error;
 
@@ -117,7 +122,8 @@ impl FromStr for ExtendedPrivKey {
 
         Ok(ExtendedPrivKey {
             chain_code: Protected::from(&data[13..45]),
-            secret_key: SecretKey::parse_slice(&data[46..78]).map_err(|e| Error::Secp256k1(e))?,
+            // secret_key: SecretKey::parse_slice(&data[46..78]).map_err(|e| Error::Secp256k1(e))?,
+            secret_key: SecretKey::from_bytes(&data[46..78]).map_err(|_| Error::Secp256k1)?,
         })
     }
 }

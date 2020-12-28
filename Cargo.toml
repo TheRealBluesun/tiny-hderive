@@ -11,11 +11,12 @@ repository = "https://github.com/maciejhirsz/tiny-hderive"
 keywords = ["bitcoin", "ethereum", "bip32", "bip39", "bip44"]
 
 [dependencies]
-libsecp256k1 = "0.2"
-base58 = "0.1.0"
-sha2 = "0.8.0"
-hmac = "0.7.0"
-memzero = "0.1.0"
+# libsecp256k1 = "0.2"
+k256 = {version="*", default-features = false, features=["ecdsa", "keccak256", "arithmetic"]}
+# base58 = {version="0.1.0", default-features=false}
+sha2 = {version="0.8.0", default-features=false}
+hmac = {version="0.7.0", default-features=false}
+# memzero = {version="0.1.0", default-features=false}
 heapless = "*"
 
 [dev-dependencies]
