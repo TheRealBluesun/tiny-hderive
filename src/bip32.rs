@@ -2,7 +2,7 @@
 use base58::FromBase58;
 use core::str::FromStr;
 use core::{convert::TryInto, ops::Deref};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, Mac, NewMac};
 use k256::{elliptic_curve::sec1::ToEncodedPoint, Scalar};
 use k256::{EncodedPoint, PublicKey, SecretKey};
 use sha2::Sha512;
@@ -54,13 +54,12 @@ impl ExtendedPrivKey {
     {
         let mut hmac: Hmac<Sha512> =
             Hmac::new_varkey(b"Bitcoin seed").expect("seed is always correct; qed");
-        hmac.input(seed);
+        hmac.update(seed);
 
-        let result = hmac.result().code();
+        let result = hmac.finalize().into_bytes();
         let (secret_key, chain_code) = result.split_at(32);
 
         let mut sk = ExtendedPrivKey {
-            // secret_key: SecretKey::parse_slice(secret_key).map_err(Error::Secp256k1)?,
             secret_key: SecretKey::from_bytes(secret_key).map_err(|_| Error::Secp256k1)?,
             chain_code: Protected::from(chain_code),
         };
@@ -78,32 +77,28 @@ impl ExtendedPrivKey {
     }
 
     pub fn child(&self, child: ChildNumber) -> Result<ExtendedPrivKey, Error> {
-        let mut hmac: Hmac<Sha512> =
-            Hmac::new_varkey(&self.chain_code).map_err(|_| Error::InvalidChildNumber)?;
+        let mut hmac =
+            Hmac::<Sha512>::new_varkey(&self.chain_code).map_err(|_| Error::InvalidChildNumber)?;
 
         if child.is_normal() {
             // hmac.input(&PublicKey::from_secret_key(&self.secret_key).serialize_compressed()[..]);
-            hmac.input(
+            hmac.update(
                 self.secret_key
                     .public_key()
                     .to_encoded_point(true)
                     .as_bytes(),
             );
         } else {
-            hmac.input(&[0]);
-            hmac.input(&self.secret_key.to_bytes()[..]);
+            hmac.update(&[0]);
+            hmac.update(&self.secret_key.to_bytes()[..]);
         }
 
-        hmac.input(&child.to_bytes());
+        hmac.update(&child.to_bytes());
 
-        let result = hmac.result().code();
+        let result = hmac.finalize().into_bytes();
         let (secret_key, chain_code) = result.split_at(32);
 
         let mut secret_key = SecretKey::from_bytes(&secret_key).map_err(|_| Error::Secp256k1)?;
-        // TODO: fix this
-        // secret_key
-        //     .tweak_add_assign(&self.secret_key)
-        //     .map_err(Error::Secp256k1)?;
         secret_key = SecretKey::from_bytes(
             (secret_key.secret_scalar().as_ref() + self.secret_key.secret_scalar().as_ref())
                 .to_bytes(),
@@ -114,6 +109,10 @@ impl ExtendedPrivKey {
             secret_key,
             chain_code: Protected::from(&chain_code),
         })
+        // Ok(ExtendedPrivKey {
+        //     secret_key: self.secret_key.clone(),
+        //     chain_code: Protected::from(&[0u8; 32]),
+        // })
     }
 }
 
